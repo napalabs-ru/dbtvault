@@ -30,6 +30,8 @@
 {%- set source_number = loop.index | string -%}
 
 row_rank_{{ source_number }} AS (
+   
+SELECT * FROM (   
     {%- if model.config.materialized == 'vault_insert_by_rank' %}
     SELECT {{ source_cols_with_rank | join(', ') }},
     {%- else %}
@@ -40,7 +42,10 @@ row_rank_{{ source_number }} AS (
                ORDER BY {{ src_ldts }} ASC
            ) AS row_number
     FROM {{ ref(src) }}
-    QUALIFY row_number = 1
+
+) as l
+WHERE row_number = 1
+
     {%- set ns.last_cte = "row_rank_{}".format(source_number) %}
 ),{{ "\n" if not loop.last }}
 {% endfor -%}
@@ -73,14 +78,17 @@ stage_mat_filter AS (
 {%- if source_model | length > 1 %}
 
 row_rank_union AS (
-    SELECT *,
-           ROW_NUMBER() OVER(
-               PARTITION BY {{ src_pk }}
-               ORDER BY {{ src_ldts }}, {{ src_source }} ASC
-           ) AS row_rank_number
-    FROM {{ ns.last_cte }}
-    WHERE {{ dbtvault.multikey(fk_cols, condition='IS NOT NULL') }}
-    QUALIFY row_rank_number = 1
+
+    SELECT * FROM (
+        SELECT *,
+            ROW_NUMBER() OVER(
+                PARTITION BY {{ src_pk }}
+                ORDER BY {{ src_ldts }}, {{ src_source }} ASC
+            ) AS row_rank_number
+        FROM {{ ns.last_cte }}
+        WHERE {{ dbtvault.multikey(fk_cols, condition='IS NOT NULL') }}
+    ) AS a
+    WHERE row_rank_number = 1
     {%- set ns.last_cte = "row_rank_union" %}
 ),
 {% endif %}
